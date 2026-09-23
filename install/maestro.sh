@@ -443,21 +443,21 @@ id "\$MAESTRO_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "\$MAESTRO_USER"
 
 echo "[LXC] Maestro CLI installieren/aktualisieren (Upstream-Installer, idempotent) ..."
 su - "\$MAESTRO_USER" -c "curl -fsSL --retry 3 --max-time 120 '\$MAESTRO_INSTALL_URL' | bash"
-su - "\$MAESTRO_USER" -c "\$HOME/.maestro/bin/maestro --version" || {
+su - "\$MAESTRO_USER" -c '\$HOME/.maestro/bin/maestro --version' || {
   echo "[LXC][ERROR] 'maestro --version' schlaegt fehl – Installation pruefen." >&2
-  su - "\$MAESTRO_USER" -c "ls -la \$HOME/.maestro/bin/" >&2 || true
+  su - "\$MAESTRO_USER" -c 'ls -la \$HOME/.maestro/bin/' >&2 || true
   exit 1
 }
 echo "[LXC] maestro --help (Kurz-Check) ..."
-su - "\$MAESTRO_USER" -c "\$HOME/.maestro/bin/maestro --help" | head -n 20 || true
+su - "\$MAESTRO_USER" -c '\$HOME/.maestro/bin/maestro --help' | head -n 20 || true
 
 echo "[LXC] Pruefe ob 'maestro studio' in dieser CLI-Version existiert ..."
-if su - "\$MAESTRO_USER" -c "\$HOME/.maestro/bin/maestro --help" | grep -q "studio"; then
+if su - "\$MAESTRO_USER" -c '\$HOME/.maestro/bin/maestro --help' | grep -q "studio"; then
   echo "[LXC] 'maestro studio' gefunden."
 else
   echo "[LXC][WARN] 'maestro studio' taucht in --help NICHT auf (neue CLI: Studio entbuendelt, Befehl hidden/entfernt)." >&2
   echo "[LXC][WARN] Versuche trotzdem 'maestro studio --help' – falls das fehlschlaegt, bleibt nur die CLI nutzbar." >&2
-  if ! su - "\$MAESTRO_USER" -c "\$HOME/.maestro/bin/maestro studio --help" >/dev/null 2>&1; then
+  if ! su - "\$MAESTRO_USER" -c '\$HOME/.maestro/bin/maestro studio --help' >/dev/null 2>&1; then
     echo "[LXC][ERROR] Diese Maestro-Version liefert KEIN 'maestro studio' mehr (Desktop-App statt Web-Studio)." >&2
     echo "[LXC][ERROR] CLI ist installiert und nutzbar (pct enter <CT> als maestro), aber es gibt keine Web UI." >&2
     echo "[LXC][ERROR] Entweder aeltere CLI pinnen oder Maestro Studio Desktop nutzen: https://maestro.dev" >&2
