@@ -1,0 +1,19 @@
+[Unit]
+Description=Maestro Studio – Web UI fuer mobiles UI-Testing (Maestro CLI)
+Documentation=https://docs.maestro.dev/maestro-cli/how-to-install-maestro-cli
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=maestro
+Group=maestro
+WorkingDirectory=/home/maestro
+Environment=JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+Environment=PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:/home/maestro/.maestro/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/maestro/run-studio.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
