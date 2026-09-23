@@ -133,7 +133,7 @@ on_error() {
     pct exec "${CTID}" -- journalctl -u "${SERVICE_NAME}" --no-pager -n 100 2>&1 || true
     echo ""
     msg_error "--- maestro-Version im Container ---"
-    pct exec "${CTID}" -- su - "${MAESTRO_USER}" -c "$HOME/.maestro/bin/maestro --version" 2>&1 || true
+    pct exec "${CTID}" -- su - "${MAESTRO_USER}" -c '$HOME/.maestro/bin/maestro --version' 2>&1 || true
     echo ""
     msg_error "--- Ports im Container (ss -tlnp) ---"
     pct exec "${CTID}" -- ss -tlnp 2>&1 || true
@@ -343,6 +343,71 @@ RestartSec=10
 WantedBy=multi-user.target
 UNIT_EOF
 
+# Wrapper-Skript SEPARAT bauen (QUOTED Heredoc = KEINE Host-Expansion;
+# dadurch kann kein Container-$ mehr auf dem Host expandieren – genau das
+# ist vorher mit '$4: unbound variable' abgebrochen). Der Studio-Port wird
+# per Platzhalter eingesetzt und per sed auf den Host-Wert gesetzt.
+TMP_RUNNER="$(mktemp /tmp/maestro-runner.XXXXXX.sh)"
+cat > "$TMP_RUNNER" <<'RUNNER_EOF'
+#!/usr/bin/env bash
+# Startet 'maestro studio --no-window' und stellt es stabil auf 0.0.0.0:9999 bereit.
+# Hintergrund: Studio waehlt seinen Port dynamisch (bevorzugt 9999). Falls es auf
+# einem anderen Port landet, forwarded socat 9999 -> echter Port (wenn 9999 frei).
+set -euo pipefail
+STUDIO_PORT="__STUDIO_PORT__"
+MAESTRO_BIN="/home/maestro/.maestro/bin/maestro"
+LOG="/var/log/maestro-studio.log"
+
+detect_java_port() {
+  ss -tlnp 2>/dev/null | awk '/java/ {print $4}' | grep -oE '[0-9]+$' | sort -un | head -n1 || true
+}
+
+# Alte Forwarder aufraeumen
+pkill -f "socat TCP-LISTEN:${STUDIO_PORT}" 2>/dev/null || true
+
+"$MAESTRO_BIN" studio --no-window >>"$LOG" 2>&1 &
+STUDIO_PID=$!
+echo "[studio] Maestro Studio gestartet (PID $STUDIO_PID), warte auf Listen-Port ..."
+
+ACTUAL=""
+for i in $(seq 1 60); do
+  sleep 2
+  if ! kill -0 "$STUDIO_PID" 2>/dev/null; then
+    echo "[studio][ERROR] Studio-Prozess starb frueh – Log:" >&2
+    tail -n 50 "$LOG" >&2 || true
+    exit 1
+  fi
+  ACTUAL="$(detect_java_port)"
+  if [[ -n "$ACTUAL" ]]; then
+    echo "[studio] Studio lauscht auf Port $ACTUAL."
+    echo "$ACTUAL" > /run/maestro-studio-port
+    break
+  fi
+done
+if [[ -z "${ACTUAL:-}" ]]; then
+  echo "[studio][ERROR] Kein Java-Listen-Port nach 120s – Log:" >&2
+  tail -n 50 "$LOG" >&2 || true
+  kill "$STUDIO_PID" 2>/dev/null || true
+  exit 1
+fi
+
+if [[ "$ACTUAL" == "$STUDIO_PORT" ]]; then
+  echo "[studio] Studio laeuft direkt auf $STUDIO_PORT – kein Forward noetig."
+  wait "$STUDIO_PID"
+else
+  echo "[studio] Forward 0.0.0.0:$STUDIO_PORT -> 127.0.0.1:$ACTUAL via socat."
+  socat "TCP-LISTEN:${STUDIO_PORT},fork,reuseaddr,bind=0.0.0.0" "TCP:127.0.0.1:${ACTUAL}" &
+  SOCAT_PID=$!
+  # Wenn Studio stirbt, stirbt der Wrapper (systemd startet neu).
+  wait "$STUDIO_PID"
+  STATUS=$?
+  kill "$SOCAT_PID" 2>/dev/null || true
+  exit "$STATUS"
+fi
+RUNNER_EOF
+sed -i "s/__STUDIO_PORT__/${STUDIO_PORT}/" "$TMP_RUNNER"
+chmod 0644 "$TMP_RUNNER"
+
 # Setup-Skript lokal bauen (Host-Variablen werden HIER expandiert,
 # Container-Variablen sind mit \$ escaped und werden ERST im LXC expandiert).
 TMP_SETUP="$(mktemp /tmp/maestro-setup.XXXXXX.sh)"
@@ -400,66 +465,9 @@ else
   fi
 fi
 
-echo "[LXC] Wrapper /opt/maestro/run-studio.sh schreiben ..."
+echo "[LXC] Wrapper /opt/maestro/run-studio.sh einrichten (per pct push uebertragen) ..."
 mkdir -p /opt/maestro
-cat > /opt/maestro/run-studio.sh <<'RUNNER_EOF'
-#!/usr/bin/env bash
-# Startet 'maestro studio --no-window' und stellt es stabil auf 0.0.0.0:9999 bereit.
-# Hintergrund: Studio waehlt seinen Port dynamisch (bevorzugt 9999). Falls es auf
-# einem anderen Port landet, forwarded socat 9999 -> echter Port (wenn 9999 frei).
-set -euo pipefail
-STUDIO_PORT="__STUDIO_PORT__"
-MAESTRO_BIN="/home/maestro/.maestro/bin/maestro"
-LOG="/var/log/maestro-studio.log"
-
-detect_java_port() {
-  ss -tlnp 2>/dev/null | awk '/java/ {print $4}' | grep -oE '[0-9]+$' | sort -un | head -n1 || true
-}
-
-# Alte Forwarder aufraeumen
-pkill -f "socat TCP-LISTEN:${STUDIO_PORT}" 2>/dev/null || true
-
-"$MAESTRO_BIN" studio --no-window >>"$LOG" 2>&1 &
-STUDIO_PID=$!
-echo "[studio] Maestro Studio gestartet (PID $STUDIO_PID), warte auf Listen-Port ..."
-
-ACTUAL=""
-for i in $(seq 1 60); do
-  sleep 2
-  if ! kill -0 "$STUDIO_PID" 2>/dev/null; then
-    echo "[studio][ERROR] Studio-Prozess starb frueh – Log:" >&2
-    tail -n 50 "$LOG" >&2 || true
-    exit 1
-  fi
-  ACTUAL="$(detect_java_port)"
-  if [[ -n "$ACTUAL" ]]; then
-    echo "[studio] Studio lauscht auf Port $ACTUAL."
-    echo "$ACTUAL" > /run/maestro-studio-port
-    break
-  fi
-done
-if [[ -z "${ACTUAL:-}" ]]; then
-  echo "[studio][ERROR] Kein Java-Listen-Port nach 120s – Log:" >&2
-  tail -n 50 "$LOG" >&2 || true
-  kill "$STUDIO_PID" 2>/dev/null || true
-  exit 1
-fi
-
-if [[ "$ACTUAL" == "$STUDIO_PORT" ]]; then
-  echo "[studio] Studio laeuft direkt auf $STUDIO_PORT – kein Forward noetig."
-  wait "$STUDIO_PID"
-else
-  echo "[studio] Forward 0.0.0.0:$STUDIO_PORT -> 127.0.0.1:$ACTUAL via socat."
-  socat "TCP-LISTEN:${STUDIO_PORT},fork,reuseaddr,bind=0.0.0.0" "TCP:127.0.0.1:${ACTUAL}" &
-  SOCAT_PID=$!
-  # Wenn Studio stirbt, stirbt der Wrapper (systemd startet neu).
-  wait "$STUDIO_PID"
-  STATUS=$?
-  kill "$SOCAT_PID" 2>/dev/null || true
-  exit "$STATUS"
-fi
-RUNNER_EOF
-sed -i "s/__STUDIO_PORT__/\$STUDIO_PORT/" /opt/maestro/run-studio.sh
+cp /tmp/run-studio.sh /opt/maestro/run-studio.sh
 chmod +x /opt/maestro/run-studio.sh
 touch /var/log/maestro-studio.log
 chown "\$MAESTRO_USER:\$MAESTRO_USER" /var/log/maestro-studio.log
@@ -530,6 +538,7 @@ SETUP_EOF
 
 chmod 0644 "$TMP_SETUP"
 msg_info "Setup-Skript lokal: $TMP_SETUP (Kopie bleibt zur Fehlersuche erhalten)"
+pct push "$CTID" "$TMP_RUNNER" /tmp/run-studio.sh
 pct push "$CTID" "$TMP_SETUP" /tmp/maestro-setup.sh
 pct exec "$CTID" -- bash /tmp/maestro-setup.sh
 msg_ok "Installation im Container abgeschlossen."
