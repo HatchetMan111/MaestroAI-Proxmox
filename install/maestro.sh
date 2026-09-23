@@ -424,7 +424,7 @@ echo "[LXC] apt update + Basis-Pakete ..."
 export DEBIAN_FRONTEND=noninteractive
 export LC_ALL=C LANG=C
 apt-get update
-apt-get install -y --no-install-recommends curl ca-certificates socat iproute2 procps openssl
+apt-get install -y --no-install-recommends curl ca-certificates socat iproute2 procps openssl unzip
 
 echo "[LXC] Java 17 sicherstellen (idempotent) ..."
 if ! java -version 2>&1 | grep -qE '"(17|18|19|2[0-9])'; then
