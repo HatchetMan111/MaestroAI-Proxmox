@@ -13,7 +13,7 @@
 #   CT_ID=101 CORES=2 RAM=2048 DISK=8 bash -c "$(wget -qLO - https://raw.githubusercontent.com/HatchetMan111/MaestroAI-Proxmox/main/install/maestro.sh)"
 #   bash maestro.sh --ctid 101 --cores 2 --memory 2048 --disk 8 --bridge vmbr0 --debug
 #
-# Hinweis: Maestro Studio ('maestro studio --no-window') ist im aktuellen CLI
+# Hinweis: Maestro Studio ('maestro studio') ist im aktuellen CLI
 # ein versteckter Befehl und waehlt seinen Port dynamisch (bevorzugt 9999).
 # Der Installer detektiert den echten Port und stellt ihn stabil auf 9999
 # bereit (socat-Forward, nur falls noetig). Ohne verbundenes Device startet
@@ -350,7 +350,7 @@ UNIT_EOF
 TMP_RUNNER="$(mktemp /tmp/maestro-runner.XXXXXX.sh)"
 cat > "$TMP_RUNNER" <<'RUNNER_EOF'
 #!/usr/bin/env bash
-# Startet 'maestro studio --no-window' und stellt es stabil auf 0.0.0.0:9999 bereit.
+# Startet 'maestro studio' und stellt es stabil auf 0.0.0.0:9999 bereit.
 # Hintergrund: Studio waehlt seinen Port dynamisch (bevorzugt 9999). Falls es auf
 # einem anderen Port landet, forwarded socat 9999 -> echter Port (wenn 9999 frei).
 set -euo pipefail
@@ -365,7 +365,7 @@ detect_java_port() {
 # Alte Forwarder aufraeumen
 pkill -f "socat TCP-LISTEN:${STUDIO_PORT}" 2>/dev/null || true
 
-"$MAESTRO_BIN" studio --no-window >>"$LOG" 2>&1 &
+"$MAESTRO_BIN" studio >>"$LOG" 2>&1 &
 STUDIO_PID=$!
 echo "[studio] Maestro Studio gestartet (PID $STUDIO_PID), warte auf Listen-Port ..."
 
